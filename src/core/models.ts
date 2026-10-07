@@ -1,3 +1,6 @@
+import type { ChannelMode } from './channel-fusion';
+export type { ChannelMode };
+
 export type EmotionLabel = '暴躁老哥' | '温柔姐姐' | '阴阳怪气' | '元气满满';
 export type StudioStage = 'record' | 'crop' | 'emotion' | 'cover' | 'collection';
 export interface CropRange { start: number; end: number }
@@ -23,6 +26,8 @@ export interface VoiceMeme {
   duration: number;
   cover: Blob;
   coverConfig: CoverConfig;
+  /** 分析采用的声道口径，随作品保存；旧作品无此字段，按历史单侧口径（左声道）解释 */
+  analysisChannel?: ChannelMode;
   createdAt: string;
 }
 

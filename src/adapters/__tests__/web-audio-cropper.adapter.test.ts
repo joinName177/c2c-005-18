@@ -7,7 +7,7 @@ const decoded = (duration = 12): DecodedAudio => ({ sampleRate: 10, duration, ch
 describe('WebAudioCropperAdapter', () => {
   it('marks imports over ten seconds as requiring crop', async () => {
     const adapter = new WebAudioCropperAdapter({ decode: async () => decoded(12) });
-    expect(await adapter.inspect(new Blob())).toEqual({ duration: 12, needsCrop: true });
+    expect(await adapter.inspect(new Blob())).toEqual({ duration: 12, needsCrop: true, channelCount: 1 });
   });
   it('caps encoded output range at ten seconds', async () => {
     const adapter = new WebAudioCropperAdapter({ decode: async () => decoded(12) });
@@ -19,8 +19,9 @@ describe('WebAudioCropperAdapter', () => {
 
 describe('WebAudioAnalyzerAdapter', () => {
   it('extracts finite normalized features and duration', async () => {
-    const result = await new WebAudioAnalyzerAdapter({ decode: async () => decoded(2) }).analyze(new Blob());
+    const result = await new WebAudioAnalyzerAdapter({ decode: async () => decoded(2) }).analyze(new Blob(), 'left');
     expect(result.duration).toBe(2);
+    expect(result.channelCount).toBe(1);
     expect(Object.values(result.features).every(Number.isFinite)).toBe(true);
   });
 });

@@ -25,7 +25,7 @@ function encodeWav(audio: DecodedAudio, range: CropRange) {
 }
 export class WebAudioCropperAdapter implements AudioCropperPort {
   constructor(private readonly deps: Dependencies = { decode: browserDecode }) {}
-  async inspect(blob: Blob) { const audio = await this.deps.decode(blob); return { duration: audio.duration, needsCrop: audio.duration > 10 }; }
+  async inspect(blob: Blob) { const audio = await this.deps.decode(blob); return { duration: audio.duration, needsCrop: audio.duration > 10, channelCount: audio.channels.length }; }
   async crop(blob: Blob, range: CropRange) {
     const audio = await this.deps.decode(blob);
     const safe = { start: Math.max(0, range.start), end: Math.min(audio.duration, range.start + Math.min(10, range.end - range.start)) };
