@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { useStudio, type StudioDependencies } from '../useStudio';
 import { coverPresetFor } from '../../core/cover-presets';
-import type { VoiceMeme } from '../../core/models';
+import type { ChannelMode, VoiceMeme } from '../../core/models';
+
+const FEATURES = { loudness:.75,dynamics:.55,pitch:.8,zeroCrossing:.62,pauseRatio:.12,tempoVariation:.6 };
 
 function dependencies(overrides: Partial<StudioDependencies> = {}): StudioDependencies {
   const saved: VoiceMeme[] = [];
   return {
     recorder: { isRecording: false, start: async () => {}, stop: async () => new Blob(['voice'], { type: 'audio/webm' }) },
-    analyzer: { analyze: async () => ({ duration: 2, features: { loudness:.75,dynamics:.55,pitch:.8,zeroCrossing:.62,pauseRatio:.12,tempoVariation:.6 } }) },
-    cropper: { inspect: async () => ({duration:2,needsCrop:false}), crop: async (blob, range) => ({blob,duration:range.end-range.start}) },
+    analyzer: { analyze: async (_blob: Blob, mode: ChannelMode = 'left') => ({ duration: 2, channelMode: mode, channelCount: 2, features: { ...FEATURES } }) },
+    cropper: { inspect: async () => ({duration:2,needsCrop:false,channelCount:2}), crop: async (blob, range) => ({blob,duration:range.end-range.start}) },
     renderer: { render: async () => new Blob(['cover'], { type: 'image/png' }) },
     repository: { list: async()=>saved, save: async(m)=>{saved.push(m)}, rename:async()=>{}, delete:async()=>{} },
     share: { share: async () => 'shared' },
@@ -35,5 +37,64 @@ describe('useStudio', () => {
     await studio.save(); expect(studio.error.value).toContain('保存失败'); expect(studio.draft.audio?.size).toBe(1);
     const existing = { id:'old',title:'旧作品',emotion:'温柔姐姐' as const,confidence:.8,features:{loudness:.2,dynamics:.2,pitch:.4,zeroCrossing:.2,pauseRatio:.3,tempoVariation:.2},audio:new Blob(['a']),duration:1,cover:new Blob(['c']),coverConfig:coverPresetFor('温柔姐姐'),createdAt:'2026-10-05' };
     studio.editMeme(existing); expect(studio.draft.title).toBe('旧作品'); expect(studio.stage.value).toBe('cover');
+  });
+  it('invalidates the old analysis when the channel mode changes until re-analyzed', async () => {
+    const studio = useStudio(dependencies());
+    await studio.startRecording(); await studio.stopRecording(); await studio.analyze();
+    expect(studio.emotionStale.value).toBe(false);
+    studio.setChannelMode('dual');
+    expect(studio.emotionStale.value).toBe(true);
+    studio.goCover(); expect(studio.stage.value).toBe('emotion');
+    await studio.save(); expect(studio.error.value).toContain('重新分析');
+    await studio.analyze();
+    expect(studio.emotionStale.value).toBe(false);
+    studio.goCover(); expect(studio.stage.value).toBe('cover');
+  });
+  it('keeps a retryable state when analysis fails', async () => {
+    let broken = true;
+    const analyzer = { analyze: async (_blob: Blob, mode: ChannelMode = 'left') => { if (broken) throw new Error('解码失败'); return { duration: 2, channelMode: mode, channelCount: 2, features: { ...FEATURES } }; } };
+    const studio = useStudio(dependencies({ analyzer }));
+    await studio.startRecording(); await studio.stopRecording();
+    await studio.analyze();
+    expect(studio.error.value).toContain('分析失败');
+    expect(studio.stage.value).toBe('crop');
+    broken = false;
+    await studio.analyze();
+    expect(studio.stage.value).toBe('emotion');
+  });
+  it('keeps the flagged old result retryable when re-analysis fails', async () => {
+    let broken = false;
+    const analyzer = { analyze: async (_blob: Blob, mode: ChannelMode = 'left') => { if (broken) throw new Error('解码失败'); return { duration: 2, channelMode: mode, channelCount: 2, features: { ...FEATURES } }; } };
+    const studio = useStudio(dependencies({ analyzer }));
+    await studio.startRecording(); await studio.stopRecording(); await studio.analyze();
+    studio.setChannelMode('right');
+    broken = true;
+    await studio.analyze();
+    expect(studio.error.value).toContain('分析失败');
+    expect(studio.emotionStale.value).toBe(true);
+    expect(studio.stage.value).toBe('emotion');
+    broken = false;
+    await studio.analyze();
+    expect(studio.emotionStale.value).toBe(false);
+  });
+  it('offers only the existing channel for mono audio', async () => {
+    const studio = useStudio(dependencies({ cropper: { inspect: async () => ({duration:2,needsCrop:false,channelCount:1}), crop: async (blob, range) => ({blob,duration:range.end-range.start}) } }));
+    await studio.startRecording(); await studio.stopRecording();
+    expect(studio.availableModes.value).toEqual(['left']);
+    studio.setChannelMode('dual');
+    expect(studio.draft.channelMode).toBe('left');
+  });
+  it('saves the channel mode with the work and reads legacy works as left channel', async () => {
+    const saved: VoiceMeme[] = [];
+    const studio = useStudio(dependencies({ repository: { list:async()=>saved, save:async(m)=>{saved.push(m)}, rename:async()=>{}, delete:async()=>{} } }));
+    await studio.startRecording(); await studio.stopRecording();
+    studio.setChannelMode('dual');
+    await studio.analyze();
+    await studio.save();
+    expect(saved[0].channelMode).toBe('dual');
+    const legacy = { id:'old',title:'旧作品',emotion:'温柔姐姐' as const,confidence:.8,features:{...FEATURES},audio:new Blob(['a']),duration:1,cover:new Blob(['c']),coverConfig:coverPresetFor('温柔姐姐'),createdAt:'2026-10-05' };
+    studio.editMeme(legacy);
+    expect(studio.draft.channelMode).toBe('left');
+    expect(studio.emotionStale.value).toBe(false);
   });
 });
